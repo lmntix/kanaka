@@ -1,0 +1,3 @@
+-- dbo.View_balance_brief source
+
+ALTER VIEW View_balance_brief AS SELECT transaction_details.accounts_id, dbo.transaction_details.sub_accounts_id, SUM(dbo.transaction_details.trans_amount) AS balance FROM transaction_head  INNER JOIN transaction_details ON dbo.transaction_head.transaction_head_id = dbo.transaction_details.transaction_head_id  WHERE transaction_head.trans_date >= ''  AND transaction_head.trans_date <= '3/31/2025' AND transaction_details.accounts_id = 3  GROUP BY transaction_details.accounts_id, transaction_details.sub_accounts_id;

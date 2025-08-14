@@ -1,0 +1,3 @@
+-- dbo.view_sub_account_balance source
+
+ALTER VIEW view_sub_account_balance AS  SELECT SUM(transaction_details.trans_amount) AS Balance, transaction_details.accounts_id, transaction_details.sub_accounts_id  FROM transaction_details INNER JOIN transaction_head ON transaction_details.transaction_head_id = transaction_head.transaction_head_id INNER JOIN  accounts ON transaction_details.accounts_id = accounts.accounts_id INNER JOIN account_groups ON accounts.account_groups_id = account_groups.account_groups_id  WHERE  account_groups.account_primary_group in (3,4) GROUP BY transaction_details.accounts_id, transaction_details.sub_accounts_id;

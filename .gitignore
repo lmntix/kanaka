@@ -1,0 +1,7 @@
+/dump_files*
+/dump/*
+
+/docker/data*
+*csv
+
+/dump/backup*

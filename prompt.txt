@@ -1,0 +1,4 @@
+you need to access my supabase instance using mcp. 
+i am building a microfinance app and the data model is basically that I have gathered till now from other alternatives. 
+help me understand the use case for each of the tables and how will be used in the microfinance app. focus specifically on the transactions interest posting etc and how will i do it in my app and then stored in db.
+first start with overview so that we can drill down further.

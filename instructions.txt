@@ -1,0 +1,21 @@
+pg_dump -h localhost -p 6543 -U postgres -d kanaka_db -F p -f backup.dump
+
+
+pg_dump -h localhost -p 6543 -U postgres -d kanaka_db --schema-only -F p -f schema.sql
+
+pg_dump -h localhost -p 6543 -U postgres -d kanaka_db --data-only -F p -f data.sql
+
+
+
+pg_dump: warning: there are circular foreign-key constraints among these tables:
+pg_dump: detail: financial_years
+pg_dump: detail: transaction_head
+pg_dump: hint: You might not be able to restore the dump without using --disable-triggers or temporarily dropping the constraints.
+pg_dump: hint: Consider using a full dump instead of a --data-only dump to avoid this problem.
+
+
+
+psql -h localhost -p 6543 -U postgres -d kanaka_db -f backup.dump
+
+
+pg_dump -h localhost -p 6543 -U postgres -d kanaka_db -s -F p -E UTF-8 -f pg_schema.sql

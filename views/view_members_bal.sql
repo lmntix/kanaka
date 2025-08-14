@@ -1,0 +1,3 @@
+-- dbo.view_members_bal source
+
+ALTER VIEW view_members_bal AS SELECT transaction_details.accounts_id, transaction_details.sub_accounts_id, sub_accounts.members_id,SUM(transaction_details.trans_amount) AS balance FROM transaction_head INNER JOIN  transaction_details ON transaction_head.transaction_head_id = transaction_details.transaction_head_id INNER JOIN  accounts ON transaction_details.accounts_id = accounts.accounts_id INNER JOIN  sub_accounts ON transaction_details.sub_accounts_id = sub_accounts.sub_accounts_id  where transaction_details.accounts_id=3 AND transaction_head.trans_date <= '3/31/2025' GROUP BY transaction_details.accounts_id, transaction_details.sub_accounts_id, sub_accounts.members_id;
