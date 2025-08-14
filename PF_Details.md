@@ -683,3 +683,810 @@ const processMonthlyInterest = async (processingDate) => {
 - **Regulatory compliance** tracking
 
 This interest posting system provides complete automation of interest calculations while maintaining full audit trails and accounting accuracy across all financial products in your microfinance application.
+
+---
+
+## 📚 Complete Account Type Functionality Guide
+
+### 1️⃣ **SAVINGS ACCOUNTS SYSTEM**
+
+#### **Database Schema**
+
+```sql
+-- saving_schemes: Product configuration
+{
+  saving_schemes_id: 1,
+  accounts_id: 64,           -- GL account link
+  name: "Saving Account",
+  type: "2",                 -- Account type
+  min_balance: 100.00,       -- Minimum balance requirement
+  max_withdrawal: 1000000.00,
+  min_withdrawal: 100.00,
+  max_deposit: 1000000.00,
+  min_deposit: 100.00,
+  interest_calc: "1",        -- Interest calculation method
+  transaction_limit: 0,      -- 0 = unlimited
+  min_int_setting: "2",      -- Minimum interest setting
+  status: "1"                -- Active
+}
+
+-- saving_accounts: Individual member accounts
+{
+  saving_accounts_id: 1,
+  sub_accounts_id: 3893,     -- Links to sub_accounts
+  saving_schemes_id: 1,      -- Product link
+  members_id: 191,           -- Member link
+  open_date: "2015-03-31",
+  interest_rate: 4.0,        -- 4% annual
+  tds_apply: "0",            -- Tax deduction at source
+  status: "4"                -- Status codes: 1=Active, 4=Closed
+}
+```
+
+#### **Interest Posting Process**
+
+```sql
+-- STEP 1: Calculate monthly interest
+INSERT INTO saving_interest_post (
+  sub_accounts_id, amount, int_date, rate, posting
+) 
+SELECT 
+  sa.sub_accounts_id,
+  ROUND((sab.balance * sa.interest_rate * 30) / 36500, 2) as interest,
+  '2016-03-31',
+  sa.interest_rate,
+  '2'  -- Calculated status
+FROM saving_accounts sa
+JOIN sub_accounts_balance sab ON sa.sub_accounts_id = sab.sub_accounts_id
+WHERE sa.status = '1';
+
+-- STEP 2: Post to GL (creates transaction)
+-- Real example: ₹84 interest on account 4000
+
+-- Transaction Header
+INSERT INTO transaction_head VALUES (
+  45695,                     -- transaction_head_id
+  '31/03/2016',             -- trans_date
+  'Interest upto 31.03.2016',
+  84.00                      -- trans_amount
+);
+
+-- Transaction Details (Double-entry)
+INSERT INTO transaction_details VALUES
+  (110301, 45695, 64, 4000, 84.00),    -- Cr. Saving Account (Liability increases)
+  (110302, 45695, 65, 4000, -84.00);   -- Dr. Saving Interest Expense
+
+-- STEP 3: Update posting status
+UPDATE saving_interest_post 
+SET posting = '1', transaction_head_id = 45695
+WHERE saving_interest_post_id = 74;
+```
+
+#### **Configuration in App**
+
+```javascript
+// Frontend Configuration Component
+const SavingsSchemeConfig = {
+  // Basic Settings
+  scheme_name: "Regular Savings",
+  gl_account_id: 64,          // Link to chart of accounts
+  
+  // Interest Settings
+  interest_rate: 4.0,          // Annual percentage
+  interest_calc_method: {
+    "1": "Daily Balance",      // Calculate on daily balance
+    "2": "Monthly Average",    // Calculate on average balance
+    "3": "Minimum Balance"     // Calculate on minimum balance
+  },
+  interest_posting_frequency: "Monthly",
+  
+  // Transaction Limits
+  min_balance: 100.00,
+  max_withdrawal_per_transaction: 1000000.00,
+  min_withdrawal: 100.00,
+  transaction_limit_per_month: 0,  // 0 = unlimited
+  
+  // Tax Settings
+  tds_applicable: false,
+  tds_rate: 10.0,              // If TDS applicable
+  
+  // Status
+  active: true
+};
+
+// Backend Interest Calculation Service
+class SavingsInterestService {
+  async calculateMonthlyInterest(processingDate) {
+    // Get all active savings accounts
+    const accounts = await db.query(`
+      SELECT sa.*, sab.balance 
+      FROM saving_accounts sa
+      JOIN sub_accounts_balance sab ON sa.sub_accounts_id = sab.sub_accounts_id
+      WHERE sa.status = '1'
+    `);
+    
+    for (const account of accounts) {
+      // Calculate interest based on method
+      const interest = this.calculateInterest(
+        account.balance,
+        account.interest_rate,
+        30  // Days in month
+      );
+      
+      // Insert into posting table
+      await db.query(`
+        INSERT INTO saving_interest_post 
+        (sub_accounts_id, amount, int_date, rate, posting)
+        VALUES ($1, $2, $3, $4, '2')
+      `, [account.sub_accounts_id, interest, processingDate, account.interest_rate]);
+    }
+  }
+  
+  calculateInterest(balance, rate, days) {
+    return (balance * rate * days) / 36500;  // 365 * 100
+  }
+}
+```
+
+---
+
+### 2️⃣ **FIXED DEPOSIT (FD) SYSTEM**
+
+#### **Database Schema**
+
+```sql
+-- fd_schemes: FD Product Types
+{
+  fd_schemes_id: 1,
+  accounts_id: 34,             -- GL account
+  name: "Fixed Deposit",
+  type: "1",                   -- 1=Regular, 2=Double, 4=MIS
+  interest_type: "2",          -- 1=Simple, 2=Compound
+  compounding: "4",            -- 1=Monthly, 2=Quarterly, 4=Yearly
+  multiplier: 0.0,             -- For double deposit schemes
+  int_rate_after_mat: 0.0,     -- Post-maturity rate
+  auto_renewal: "0",           -- Auto renewal flag
+  broken_period: "365",        -- Days calculation method
+  int_rate_snr_citizen: 0.5    -- Senior citizen additional rate
+}
+
+-- fd_accounts: Individual FD Accounts
+{
+  fd_accounts_id: 10,
+  sub_accounts_id: 1785,
+  fd_schemes_id: 1,
+  members_id: 331,
+  tenure_months: 12,
+  fd_amount: 14202.00,
+  open_date: "2014-03-31",
+  interest_rate: 10.0,
+  maturity_date: "2015-03-31",
+  maturity_amount: 15622.00,   -- Pre-calculated
+  receipt_no: "1120",
+  reinvest_interest: "0",       -- 0=Pay out, 1=Reinvest
+  tds_apply: "0",
+  status: "1"                   -- 1=Active, 2=Matured, 3=Closed
+}
+```
+
+#### **Maturity Calculation**
+
+```sql
+-- Compound Interest Formula
+-- A = P(1 + r/n)^(nt)
+-- Where: P=Principal, r=Rate, n=Compounding frequency, t=Time
+
+CREATE FUNCTION calculate_fd_maturity(
+  principal DECIMAL,
+  rate DECIMAL,
+  tenure_months INT,
+  compounding INT
+) RETURNS DECIMAL AS $$
+DECLARE
+  maturity_amount DECIMAL;
+  n INT;  -- Compounding frequency per year
+BEGIN
+  -- Set compounding frequency
+  n := CASE compounding
+    WHEN 1 THEN 12  -- Monthly
+    WHEN 2 THEN 4   -- Quarterly
+    WHEN 4 THEN 1   -- Yearly
+    ELSE 1
+  END;
+  
+  -- Calculate maturity
+  maturity_amount := principal * POWER(
+    (1 + (rate/100/n)), 
+    (n * tenure_months/12)
+  );
+  
+  RETURN ROUND(maturity_amount, 2);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example: ₹14,202 @ 10% for 12 months = ₹15,622
+SELECT calculate_fd_maturity(14202, 10.0, 12, 4);  -- Returns 15622.00
+```
+
+#### **Interest Posting Process**
+
+```sql
+-- FD Interest posting (Monthly/Quarterly)
+INSERT INTO fd_interest_post (
+  sub_accounts_id, amount, int_date, rate, posting
+) VALUES (
+  1812,       -- FD account
+  13629.00,   -- Large interest amount
+  '2016-03-31',
+  11.5,       -- Higher rate for FD
+  '1'         -- Posted status
+);
+
+-- GL Transaction for FD interest
+INSERT INTO transaction_details VALUES
+  (trans_id, 35, 1812, -13629.00),  -- Dr. FD Interest Expense
+  (trans_id, 34, 1812, 13629.00);   -- Cr. FD Account (Liability)
+```
+
+#### **Configuration in App**
+
+```javascript
+// FD Scheme Configuration
+const FDSchemeConfig = {
+  // Product Settings
+  scheme_name: "Regular Fixed Deposit",
+  minimum_amount: 1000.00,
+  maximum_amount: 10000000.00,
+  
+  // Tenure Options
+  tenure_options: [
+    { months: 6, rate: 8.5 },
+    { months: 12, rate: 10.0 },
+    { months: 24, rate: 10.5 },
+    { months: 36, rate: 11.0 },
+    { months: 60, rate: 11.5 }
+  ],
+  
+  // Interest Settings
+  interest_type: "Compound",
+  compounding_frequency: "Quarterly",
+  senior_citizen_bonus: 0.5,
+  
+  // Maturity Options
+  auto_renewal: false,
+  interest_payout_options: [
+    "Monthly",
+    "Quarterly",
+    "At Maturity",
+    "Reinvest"
+  ],
+  
+  // Premature Closure
+  allow_premature_closure: true,
+  penalty_rate: 1.0,  // 1% penalty
+  
+  // Tax
+  tds_applicable: true,
+  tds_threshold: 40000.00
+};
+
+// FD Maturity Calculator Service
+class FDService {
+  calculateMaturity(principal, rate, months, compounding = 'quarterly') {
+    const n = compounding === 'quarterly' ? 4 : 12;
+    const t = months / 12;
+    
+    const maturity = principal * Math.pow(
+      (1 + (rate / 100 / n)),
+      (n * t)
+    );
+    
+    return {
+      principal: principal,
+      interest: maturity - principal,
+      maturityAmount: maturity,
+      effectiveRate: ((maturity - principal) / principal) * 100 / t
+    };
+  }
+  
+  async createFD(memberData) {
+    const maturityCalc = this.calculateMaturity(
+      memberData.amount,
+      memberData.rate,
+      memberData.tenure
+    );
+    
+    // Create FD account
+    const fd = await db.query(`
+      INSERT INTO fd_accounts (
+        members_id, fd_amount, tenure_months,
+        interest_rate, maturity_date, maturity_amount
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING fd_accounts_id
+    `, [
+      memberData.memberId,
+      memberData.amount,
+      memberData.tenure,
+      memberData.rate,
+      maturityCalc.maturityDate,
+      maturityCalc.maturityAmount
+    ]);
+    
+    return fd;
+  }
+}
+```
+
+---
+
+### 3️⃣ **RECURRING DEPOSIT (RD) SYSTEM**
+
+#### **Database Schema**
+
+```sql
+-- recurring_schemes: RD Products
+{
+  recurring_schemes_id: 1,
+  accounts_id: 76,
+  name: "Compulsary Deposit",
+  interest_type: "1",           -- 1=Simple, 2=Compound
+  compounding: "0",             -- 0=No compounding
+  premat_close_penalty_rate: 0.0,
+  missing_inst_penalty_rate: 0.0,
+  status: "1"
+}
+
+-- recurring_accounts: Member RD Accounts
+{
+  recurring_accounts_id: 1,
+  sub_accounts_id: 252,
+  recurring_schemes_id: 1,
+  members_id: 1,
+  monthly_amount: 200.00,       -- Monthly installment
+  period: 1000,                 -- Months (83 years!)
+  interest_rate: 8.0,
+  maturity_date: "2096-07-31",
+  maturity_amount: 1034167.00,  -- Calculated maturity
+  status: "1"
+}
+```
+
+#### **RD Maturity Calculation**
+
+```sql
+-- RD Maturity Formula
+-- M = P × n + P × n × (n+1) × r / (2 × 12 × 100)
+-- Where: P=Monthly deposit, n=Months, r=Annual rate
+
+CREATE FUNCTION calculate_rd_maturity(
+  monthly_amount DECIMAL,
+  months INT,
+  annual_rate DECIMAL
+) RETURNS DECIMAL AS $$
+DECLARE
+  total_deposits DECIMAL;
+  interest DECIMAL;
+  maturity DECIMAL;
+BEGIN
+  -- Total deposits
+  total_deposits := monthly_amount * months;
+  
+  -- Interest calculation (simplified)
+  interest := (monthly_amount * months * (months + 1) * annual_rate) / (2 * 12 * 100);
+  
+  -- Maturity amount
+  maturity := total_deposits + interest;
+  
+  RETURN ROUND(maturity, 2);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example: ₹200/month for 60 months @ 8%
+SELECT calculate_rd_maturity(200, 60, 8.0);  -- Returns ~13,920
+```
+
+#### **Monthly Processing**
+
+```sql
+-- Process monthly RD installments
+CREATE PROCEDURE process_rd_installments(processing_date DATE)
+AS $$
+BEGIN
+  -- Create transactions for each active RD
+  INSERT INTO transaction_head (trans_date, trans_narration, trans_amount)
+  SELECT 
+    processing_date,
+    'RD Monthly Installment - ' || ra.recurring_accounts_id,
+    ra.monthly_amount
+  FROM recurring_accounts ra
+  WHERE ra.status = '1';
+  
+  -- Post to member accounts
+  INSERT INTO transaction_details
+  SELECT 
+    th.transaction_head_id,
+    1,  -- Cash account
+    ra.sub_accounts_id,
+    ra.monthly_amount  -- Dr. Cash
+  FROM recurring_accounts ra
+  JOIN transaction_head th ON ...
+  
+  UNION ALL
+  
+  SELECT 
+    th.transaction_head_id,
+    76,  -- RD account
+    ra.sub_accounts_id,
+    -ra.monthly_amount  -- Cr. RD
+  FROM recurring_accounts ra
+  JOIN transaction_head th ON ...;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### **Configuration in App**
+
+```javascript
+// RD Scheme Configuration
+const RDSchemeConfig = {
+  scheme_name: "Monthly Recurring Deposit",
+  
+  // Installment Settings
+  minimum_installment: 100.00,
+  maximum_installment: 50000.00,
+  installment_multiples: 100,  // Must be in multiples of 100
+  
+  // Tenure Options
+  minimum_tenure_months: 6,
+  maximum_tenure_months: 120,
+  
+  // Interest Settings
+  interest_rates: [
+    { months: 12, rate: 8.0 },
+    { months: 24, rate: 8.5 },
+    { months: 36, rate: 9.0 },
+    { months: 60, rate: 9.5 },
+    { months: 120, rate: 10.0 }
+  ],
+  
+  // Penalties
+  missed_installment_penalty: 2.0,  // % of installment
+  premature_closure_penalty: 1.0,   // % reduction in interest
+  
+  // Grace Period
+  grace_period_days: 10
+};
+
+// RD Management Service
+class RDService {
+  async processMonthlyInstallments(processingDate) {
+    const activeRDs = await db.query(`
+      SELECT * FROM recurring_accounts 
+      WHERE status = '1'
+    `);
+    
+    for (const rd of activeRDs) {
+      // Check if installment already paid
+      const paid = await this.checkInstallmentPaid(rd.id, processingDate);
+      
+      if (!paid) {
+        // Create installment transaction
+        await this.createInstallmentTransaction(rd, processingDate);
+        
+        // Update account balance
+        await this.updateRDBalance(rd.sub_accounts_id, rd.monthly_amount);
+      }
+    }
+  }
+  
+  calculateMaturity(monthlyAmount, tenure, rate) {
+    const totalDeposits = monthlyAmount * tenure;
+    const interest = (monthlyAmount * tenure * (tenure + 1) * rate) / (2 * 12 * 100);
+    
+    return {
+      totalDeposits,
+      totalInterest: interest,
+      maturityAmount: totalDeposits + interest,
+      effectiveRate: (interest / totalDeposits) * 100
+    };
+  }
+}
+```
+
+---
+
+### 4️⃣ **LOAN ACCOUNTS SYSTEM**
+
+#### **Database Schema**
+
+```sql
+-- loan_schemes: Loan Products
+{
+  loan_schemes_id: 1,
+  accounts_id: 4,              -- GL account
+  name: "Member Loan",
+  type: "2",                   -- Loan type
+  int_days_month: "1",         -- Interest calculation
+  installment_type: "2",       -- EMI type
+  demand_loan: "0",            -- Demand loan flag
+  rebate_rate: -1.0,           -- Early payment rebate
+  penalty_on: "0",             -- Penalty calculation
+  total_guarantors: 0,         -- Required guarantors
+  status: "1"
+}
+
+-- loan_accounts: Individual Loans
+{
+  loan_accounts_id: 11,
+  sub_accounts_id: 1940,
+  loan_schemes_id: 1,
+  members_id: 311,
+  loan_amount: 2900.00,
+  interest_rate: 14.0,         -- 14% annual
+  open_date: "2014-12-09",
+  first_installment_date: "2015-01-09",
+  tenure: 48,                  -- Months
+  installment_amt: 500.00,     -- Monthly EMI
+  total_installments: 48,
+  secured: "0",                -- 0=Unsecured, 1=Secured
+  status: "1"                  -- 1=Active, 2=Closed, 3=NPA
+}
+```
+
+#### **EMI Calculation**
+
+```sql
+-- EMI Formula: E = P × r × (1+r)^n / ((1+r)^n - 1)
+CREATE FUNCTION calculate_emi(
+  principal DECIMAL,
+  annual_rate DECIMAL,
+  tenure_months INT
+) RETURNS DECIMAL AS $$
+DECLARE
+  monthly_rate DECIMAL;
+  emi DECIMAL;
+BEGIN
+  monthly_rate := annual_rate / 12 / 100;
+  
+  emi := principal * monthly_rate * POWER(1 + monthly_rate, tenure_months) /
+         (POWER(1 + monthly_rate, tenure_months) - 1);
+  
+  RETURN ROUND(emi, 2);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example: ₹100,000 @ 14% for 48 months
+SELECT calculate_emi(100000, 14, 48);  -- Returns ~2,734
+```
+
+#### **Loan Interest Posting**
+
+```sql
+-- Daily interest accrual on loans
+INSERT INTO loan_interest_post (
+  sub_accounts_id, amount, int_date, rate, posting, due_amount
+) 
+SELECT 
+  la.sub_accounts_id,
+  ROUND((outstanding * la.interest_rate) / 36500, 2),  -- Daily interest
+  CURRENT_DATE,
+  la.interest_rate,
+  '2',  -- Calculated
+  0     -- Due amount
+FROM loan_accounts la
+JOIN (
+  SELECT 
+    sub_accounts_id,
+    loan_amount - COALESCE(SUM(principal_paid), 0) as outstanding
+  FROM loan_repayments
+  GROUP BY sub_accounts_id
+) bal ON la.sub_accounts_id = bal.sub_accounts_id
+WHERE la.status = '1';
+
+-- Monthly interest posting to GL
+-- Real example: ₹20 interest on Weekly Loan
+INSERT INTO transaction_details VALUES
+  (4537, 223, 4088, 20.00),    -- Dr. Loan Interest Receivable
+  (4537, 222, 4088, -20.00);   -- Cr. Weekly Loan (reduces principal)
+```
+
+#### **Configuration in App**
+
+```javascript
+// Loan Scheme Configuration
+const LoanSchemeConfig = {
+  scheme_name: "Personal Loan",
+  
+  // Loan Limits
+  minimum_amount: 10000.00,
+  maximum_amount: 5000000.00,
+  
+  // Interest Settings
+  interest_rate_range: {
+    minimum: 12.0,
+    maximum: 18.0
+  },
+  interest_calculation: "Reducing Balance",
+  
+  // Tenure
+  minimum_tenure_months: 6,
+  maximum_tenure_months: 84,
+  
+  // Repayment
+  repayment_frequency: [
+    "Monthly",
+    "Weekly",
+    "Fortnightly"
+  ],
+  
+  // Security
+  secured_loan: false,
+  guarantors_required: 2,
+  
+  // Charges
+  processing_fee: 2.0,  // % of loan amount
+  prepayment_charges: 2.0,
+  penal_interest: 2.0,  // Additional % on overdue
+  
+  // Documents Required
+  required_documents: [
+    "Identity Proof",
+    "Address Proof",
+    "Income Proof",
+    "Bank Statements"
+  ]
+};
+
+// Loan Management Service
+class LoanService {
+  async disburseLoan(loanData) {
+    // Calculate EMI
+    const emi = this.calculateEMI(
+      loanData.amount,
+      loanData.rate,
+      loanData.tenure
+    );
+    
+    // Create loan account
+    const loan = await db.query(`
+      INSERT INTO loan_accounts (
+        members_id, loan_amount, interest_rate,
+        tenure, installment_amt, open_date
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+      RETURNING loan_accounts_id, sub_accounts_id
+    `, [loanData.memberId, loanData.amount, loanData.rate, loanData.tenure, emi]);
+    
+    // Create disbursement transaction
+    await this.createDisbursementTransaction(loan, loanData.amount);
+    
+    // Generate repayment schedule
+    await this.generateRepaymentSchedule(loan.loan_accounts_id, emi, loanData.tenure);
+    
+    return loan;
+  }
+  
+  async processEMI(loanId, paymentAmount) {
+    const loan = await db.query(
+      'SELECT * FROM loan_accounts WHERE loan_accounts_id = $1',
+      [loanId]
+    );
+    
+    // Calculate interest and principal components
+    const outstanding = await this.getOutstandingBalance(loanId);
+    const interestComponent = (outstanding * loan.interest_rate) / 1200;
+    const principalComponent = paymentAmount - interestComponent;
+    
+    // Create repayment transaction
+    const transId = await this.createTransaction({
+      amount: paymentAmount,
+      narration: `EMI Payment - Loan ${loanId}`
+    });
+    
+    // Post to GL
+    await db.query(`
+      INSERT INTO transaction_details VALUES
+      ($1, 1, $2, $3),      -- Dr. Cash
+      ($1, 4, $2, $4),      -- Cr. Loan Principal
+      ($1, 5, $2, $5)       -- Cr. Interest Income
+    `, [transId, loan.sub_accounts_id, paymentAmount, 
+        -principalComponent, -interestComponent]);
+    
+    // Update loan repayment record
+    await db.query(`
+      INSERT INTO loan_repayments (
+        loan_accounts_id, payment_date, principal_paid,
+        interest_paid, total_paid
+      ) VALUES ($1, CURRENT_DATE, $2, $3, $4)
+    `, [loanId, principalComponent, interestComponent, paymentAmount]);
+  }
+}
+```
+
+---
+
+### 🔧 **CONFIGURATION CHECKLIST FOR APP SETUP**
+
+#### **Global Settings**
+```javascript
+const GlobalConfig = {
+  // Financial Year
+  financial_year_start: "April 1",
+  financial_year_end: "March 31",
+  
+  // Interest Posting
+  interest_posting_day: 31,  // Last day of month
+  interest_calculation_basis: 365,  // Days in year
+  
+  // Tax Settings
+  tds_rate: 10.0,
+  tds_threshold: 40000.00,
+  
+  // System Settings
+  auto_interest_posting: true,
+  require_approval_for_interest: false,
+  batch_size_for_processing: 100,
+  
+  // Audit
+  maintain_audit_trail: true,
+  audit_retention_years: 7
+};
+```
+
+#### **Account Type Configuration Matrix**
+
+| Feature | Savings | Fixed Deposit | Recurring | Loan |
+|---------|---------|--------------|-----------|------|
+| **Interest Type** | Simple | Compound | Simple/Compound | Reducing |
+| **Interest Frequency** | Monthly | Quarterly/Maturity | Maturity | Daily/Monthly |
+| **Transaction Type** | Credit/Debit | Credit Only | Credit Monthly | Debit (EMI) |
+| **Maturity** | No | Yes | Yes | Yes (Tenure) |
+| **Premature Closure** | Yes | Yes (Penalty) | Yes (Penalty) | Yes (Charges) |
+| **TDS Applicable** | Yes | Yes | Yes | No |
+| **Minimum Balance** | Yes | No | No | No |
+| **Installments** | No | No | Yes (Monthly) | Yes (EMI) |
+| **GL Impact** | Liability | Liability | Liability | Asset |
+
+#### **Interest Posting Schedule**
+
+```javascript
+// Cron Job Configuration
+const InterestPostingSchedule = {
+  savings: {
+    schedule: "0 0 31 * *",  // Last day of month at midnight
+    process: "calculateAndPostSavingsInterest"
+  },
+  
+  fixed_deposit: {
+    schedule: "0 0 */3 * *",  // Every quarter
+    process: "calculateAndPostFDInterest"
+  },
+  
+  recurring_deposit: {
+    schedule: "0 0 1 * *",  // First day of month
+    process: "processRDInstallments"
+  },
+  
+  loan: {
+    schedule: "0 0 * * *",  // Daily
+    process: "calculateLoanInterest"
+  },
+  
+  loan_posting: {
+    schedule: "0 0 5 * *",  // 5th of every month
+    process: "postLoanInterestToGL"
+  }
+};
+```
+
+### 🚀 **Implementation Best Practices**
+
+1. **Transaction Atomicity**: Always wrap interest posting in database transactions
+2. **Idempotency**: Ensure interest calculations can be re-run safely
+3. **Audit Trail**: Log all interest calculations and postings
+4. **Reconciliation**: Daily balance reconciliation between sub_accounts and GL
+5. **Error Handling**: Implement rollback mechanisms for failed postings
+6. **Performance**: Use batch processing for large volumes
+7. **Compliance**: Maintain regulatory reports for interest payments
+8. **Testing**: Comprehensive test cases for each account type
+
+This comprehensive guide provides everything needed to understand and implement all account types in your microfinance application with proper interest posting and transaction management.
