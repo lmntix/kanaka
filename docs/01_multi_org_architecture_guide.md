@@ -21,8 +21,8 @@ The system currently uses a robust double-entry bookkeeping system with:
    - Amount handling with positive/negative values for debit/credit
 
 3. **Account Structure**
-   - `accounts`: Main account types (shares, loans, FD, RD, etc.)
-   - `sub_accounts`: Individual member account instances
+   - `accounts`: Organization-specific chart of accounts with GL codes (shares, loans, FD, RD, etc.)
+   - `sub_accounts`: Individual member account instances linked to organization-specific accounts
    - Product-specific tables: `fd_accounts`, `loan_accounts`, `recurring_accounts`, `saving_accounts`
 
 4. **Date Management**

@@ -2,3 +2,9 @@ you need to access my supabase instance using mcp.
 i am building a microfinance app and the data model is basically that I have gathered till now from other alternatives. 
 help me understand the use case for each of the tables and how will be used in the microfinance app. focus specifically on the transactions interest posting etc and how will i do it in my app and then stored in db.
 first start with overview so that we can drill down further.
+
+
+
+i am creating amicrofinance app for multiple organization in same app. i have separate account tables such as fixed deposit accounts, saving accounts, loan accounts and recurring deposit accounts. 
+how do i map these tables to specific chart of accounts for each organization so that its easy for me to build an app around it and understand the design. 
+you as a business analyst need to explain this to me as a developer with design documents and sample table with demo data if possible. for simplicity use drizzle orm and postgres as a language to showcase the schema for better understanding

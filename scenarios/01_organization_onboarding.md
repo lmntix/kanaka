@@ -21,43 +21,45 @@ status: "ACTIVE"
 ### Phase 1: Automatic Backend Setup (Your Code)
 
 #### 1.1 Create Organization's Chart of Accounts
-**What**: Set up the basic accounting structure for the organization
-**Why**: Every cooperative needs standard account types (Cash, Savings, Loans, etc.)
+**What**: Set up organization-specific accounts directly in the accounts table
+**Why**: Every cooperative needs standard account types (Cash, Savings, Loans, etc.) with their own GL codes
 
 ```sql
--- Example: Setup default account types for organization
-INSERT INTO org_account_types (organization_id, account_type_id, org_gl_code, org_account_name, is_enabled)
-SELECT 123, account_type_id, default_gl_code, account_type_name, TRUE
-FROM account_types_master 
-WHERE account_type_code IN ('CASH', 'BANK', 'SAVINGS', 'LOAN', 'SHARES');
+-- Direct creation of organization-specific accounts
+-- ASSETS
+INSERT INTO accounts (organization_id, account_name, account_type, opening_balance, gl_code, status, balance_type) VALUES 
+(123, 'Cash in Hand', 'ASSET', 0.00, '1001', 'ACTIVE', 'DEBIT'),
+(123, 'Bank - Current Account', 'ASSET', 0.00, '1002', 'ACTIVE', 'DEBIT'),
+(123, 'Members Loan Accounts', 'ASSET', 0.00, '1100', 'ACTIVE', 'DEBIT');
 
--- Results in organization getting:
--- GL 1001 - Cash in Hand
--- GL 1002 - Bank Account  
--- GL 2001 - Member Savings
--- GL 1101 - Member Loans
--- GL 3001 - Share Capital
+-- LIABILITIES
+INSERT INTO accounts (organization_id, account_name, account_type, opening_balance, gl_code, status, balance_type) VALUES 
+(123, 'Share Capital', 'LIABILITY', 0.00, '2001', 'ACTIVE', 'CREDIT'),
+(123, 'Members Savings Deposits', 'LIABILITY', 0.00, '2100', 'ACTIVE', 'CREDIT'),
+(123, 'Members Fixed Deposits', 'LIABILITY', 0.00, '2200', 'ACTIVE', 'CREDIT');
+
+-- INCOME
+INSERT INTO accounts (organization_id, account_name, account_type, opening_balance, gl_code, status, balance_type) VALUES 
+(123, 'Interest Income - Loans', 'INCOME', 0.00, '4001', 'ACTIVE', 'CREDIT'),
+(123, 'Service Fee Income', 'INCOME', 0.00, '4020', 'ACTIVE', 'CREDIT');
+
+-- EXPENSES
+INSERT INTO accounts (organization_id, account_name, account_type, opening_balance, gl_code, status, balance_type) VALUES 
+(123, 'Interest Expense - Savings', 'EXPENSE', 0.00, '5001', 'ACTIVE', 'DEBIT'),
+(123, 'Staff Salaries', 'EXPENSE', 0.00, '5100', 'ACTIVE', 'DEBIT');
+
+-- Results in organization getting their own chart of accounts:
+-- GL 1001 - Cash in Hand (ASSET)
+-- GL 1002 - Bank - Current Account (ASSET)
+-- GL 2001 - Share Capital (LIABILITY)
+-- GL 2100 - Members Savings Deposits (LIABILITY)
+-- GL 4001 - Interest Income - Loans (INCOME)
+-- GL 5001 - Interest Expense - Savings (EXPENSE)
 ```
 
-**Your Backend Task**: Create default account configuration automatically when organization status becomes "ACTIVE"
+**Your Backend Task**: Create complete chart of accounts directly for the organization using a template function or manual insertion
 
-#### 1.2 Create Account Instances
-**What**: Create actual account records that will be used in transactions
-**Why**: Transactions need actual accounts to debit/credit
-
-```sql
--- Create account instances from the configured account types
-INSERT INTO accounts (organization_id, account_type_id, account_name, account_type, balance_type, gl_code, status)
-SELECT oat.organization_id, oat.account_type_id, oat.org_account_name, 
-       atm.account_type_code, atm.balance_type, oat.org_gl_code, 'ACTIVE'
-FROM org_account_types oat
-JOIN account_types_master atm ON oat.account_type_id = atm.account_type_id
-WHERE oat.organization_id = 123;
-```
-
-**Your Backend Task**: Auto-create account instances for all enabled account types
-
-#### 1.3 Initialize Voucher Sequences
+#### 1.2 Initialize Voucher Sequences
 **What**: Set up voucher numbering for the organization
 **Why**: Each transaction needs a unique voucher number
 
@@ -73,7 +75,7 @@ VALUES
 
 **Your Backend Task**: Create default voucher sequences for current financial year
 
-#### 1.4 Initialize Account Number Sequences  
+#### 1.3 Initialize Account Number Sequences
 **What**: Set up account numbering for member accounts
 **Why**: Each member account needs unique numbers
 
@@ -88,7 +90,7 @@ VALUES
 
 **Your Backend Task**: Create account numbering sequences for member account types
 
-#### 1.5 Setup Organization Calendar
+#### 1.4 Setup Organization Calendar
 **What**: Create business calendar for the organization  
 **Why**: Date management and business day control
 
@@ -144,9 +146,11 @@ VALUES
 
 **Example**: Organization's main cash account
 ```sql
--- Create cash sub-account for organization
-INSERT INTO sub_accounts (organization_id, accounts_id, members_id, sub_accounts_no, name, status)
-VALUES (123, [cash_account_id], NULL, 'CASH-RCC001', 'Main Cash Counter', 'ACTIVE');
+-- Create cash sub-account for organization operations
+INSERT INTO sub_accounts (organization_id, accounts_id, members_id, account_no, opening_balance, account_type, status)
+VALUES (123, 
+        (SELECT accounts_id FROM accounts WHERE organization_id = 123 AND gl_code = '1001'), 
+        NULL, 'CASH-RCC001', 0.00, 'SYSTEM', 'ACTIVE');
 ```
 
 ## What Organization Can Start Doing
@@ -164,8 +168,10 @@ INSERT INTO members (organization_id, full_name, status, appli_date)
 VALUES (123, 'Rajesh Kumar', 'ACTIVE', CURRENT_DATE);
 
 -- 2. System auto-creates member's savings account
-INSERT INTO sub_accounts (organization_id, accounts_id, members_id, sub_accounts_no, name)
-VALUES (123, [savings_account_id], [member_id], 'SAV001001', 'Savings Account');
+INSERT INTO sub_accounts (organization_id, accounts_id, members_id, account_no, opening_balance, account_type, status)
+VALUES (123, 
+        (SELECT accounts_id FROM accounts WHERE organization_id = 123 AND gl_code = '2100'),
+        [member_id], 'SAV001001', 0.00, 'SAVINGS', 'ACTIVE');
 
 -- 3. Member makes first deposit
 -- Dr. Cash Account, Cr. Member Savings Account
@@ -174,11 +180,11 @@ VALUES (123, [savings_account_id], [member_id], 'SAV001001', 'Savings Account');
 ## Business Rules Summary
 
 ### Backend Automation (Your Code):
-✅ **Chart of accounts creation** - Standard accounting structure  
-✅ **Voucher sequence setup** - Transaction numbering  
-✅ **Account number sequences** - Member account numbering  
-✅ **Calendar initialization** - Business date management  
-✅ **Default financial year** - Current year setup  
+✅ **Chart of accounts creation** - Direct organization-specific accounts with custom GL codes  
+✅ **Voucher sequence setup** - Transaction numbering per organization  
+✅ **Account number sequences** - Member account numbering per organization  
+✅ **Calendar initialization** - Business date management per organization  
+✅ **Default financial year** - Current year setup per organization
 
 ### Manual Admin Tasks (In App):
 📝 **Organization settings** - Interest rates, business rules  
@@ -194,25 +200,28 @@ VALUES (123, [savings_account_id], [member_id], 'SAV001001', 'Savings Account');
 -- Check organization is fully set up
 SELECT 
     o.organization_name,
-    COUNT(DISTINCT oat.org_account_type_id) as account_types_configured,
     COUNT(DISTINCT a.accounts_id) as accounts_created,
+    COUNT(DISTINCT CASE WHEN a.account_type = 'ASSET' THEN 1 END) as asset_accounts,
+    COUNT(DISTINCT CASE WHEN a.account_type = 'LIABILITY' THEN 1 END) as liability_accounts,
+    COUNT(DISTINCT CASE WHEN a.account_type = 'INCOME' THEN 1 END) as income_accounts,
+    COUNT(DISTINCT CASE WHEN a.account_type = 'EXPENSE' THEN 1 END) as expense_accounts,
     COUNT(DISTINCT vs.sequence_id) as voucher_sequences,
     COUNT(DISTINCT ans.sequence_id) as account_sequences
 FROM organizations o
-LEFT JOIN org_account_types oat ON o.organization_id = oat.organization_id
 LEFT JOIN accounts a ON o.organization_id = a.organization_id  
 LEFT JOIN voucher_sequences vs ON o.organization_id = vs.organization_id
 LEFT JOIN account_number_sequences ans ON o.organization_id = ans.organization_id
 WHERE o.organization_id = 123
 GROUP BY o.organization_id, o.organization_name;
 
--- Should show: account_types: 5+, accounts: 5+, voucher_sequences: 4+, account_sequences: 3+
+-- Should show: accounts_created: 8+, asset_accounts: 3+, liability_accounts: 3+, 
+-- income_accounts: 2+, expense_accounts: 2+, voucher_sequences: 4+, account_sequences: 3+
 ```
 
 ## Key Takeaway
 
-**Organization onboarding is split**:
-- **System Setup (Backend)**: All foundational data structures
+**Organization onboarding is simplified**:
+- **System Setup (Backend)**: Direct creation of organization-specific accounts with custom GL codes
 - **Business Configuration (Admin)**: Customization and daily operations
 
-Once your backend completes the automatic setup, the organization admin can immediately start using the system for their cooperative banking operations.
+The simplified approach creates organization-specific accounts directly in the accounts table with custom GL codes, eliminating the need for complex mapping tables while ensuring complete data isolation and flexibility for each organization.
